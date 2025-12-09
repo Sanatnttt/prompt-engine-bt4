@@ -4,9 +4,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { 
   Skull, ArrowLeft, Users, KeyRound, Plus, Copy, Check, 
-  Trash2, Loader2, UserPlus, Shield, Clock
+  Trash2, Loader2, UserPlus, Shield, Clock, Settings, Save
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -26,6 +27,12 @@ interface UserProfile {
   created_at: string;
 }
 
+interface SiteSetting {
+  id: string;
+  setting_key: string;
+  setting_value: string;
+}
+
 export default function Admin() {
   const { user, isAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -34,6 +41,11 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [generatingCode, setGeneratingCode] = useState(false);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  
+  // Site settings
+  const [siteSettings, setSiteSettings] = useState<SiteSetting[]>([]);
+  const [editedSettings, setEditedSettings] = useState<Record<string, string>>({});
+  const [savingSettings, setSavingSettings] = useState(false);
   
   // Direct user creation
   const [showCreateUser, setShowCreateUser] = useState(false);
@@ -77,8 +89,24 @@ export default function Admin() {
         .select("*")
         .order("created_at", { ascending: false });
 
+      // Fetch site settings
+      const { data: settings } = await supabase
+        .from("site_settings")
+        .select("*")
+        .order("setting_key");
+
       setInviteCodes(codes || []);
       setUsers(profiles || []);
+      setSiteSettings(settings || []);
+      
+      // Initialize edited settings
+      if (settings) {
+        const initialSettings = settings.reduce((acc, s) => {
+          acc[s.setting_key] = s.setting_value;
+          return acc;
+        }, {} as Record<string, string>);
+        setEditedSettings(initialSettings);
+      }
     } catch (error) {
       toast.error("Failed to fetch data");
     } finally {
@@ -187,6 +215,43 @@ export default function Admin() {
     }
   };
 
+  const updateSetting = (key: string, value: string) => {
+    setEditedSettings(prev => ({ ...prev, [key]: value }));
+  };
+
+  const saveSettings = async () => {
+    setSavingSettings(true);
+    try {
+      for (const setting of siteSettings) {
+        const newValue = editedSettings[setting.setting_key];
+        if (newValue !== setting.setting_value) {
+          const { error } = await supabase
+            .from("site_settings")
+            .update({ setting_value: newValue, updated_at: new Date().toISOString() })
+            .eq("setting_key", setting.setting_key);
+          
+          if (error) throw error;
+        }
+      }
+      toast.success("Settings saved successfully!");
+      fetchData();
+    } catch (error) {
+      toast.error("Failed to save settings");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const getSettingLabel = (key: string) => {
+    const labels: Record<string, string> = {
+      site_name: "Site Name",
+      site_description: "Site Description",
+      footer_text: "Footer Text",
+      login_subtitle: "Login Page Subtitle",
+    };
+    return labels[key] || key;
+  };
+
   if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -214,7 +279,7 @@ export default function Admin() {
               </div>
               <div>
                 <h1 className="font-bold text-lg text-foreground">Admin Panel</h1>
-                <p className="text-xs text-muted-foreground">User Management</p>
+                <p className="text-xs text-muted-foreground">User & Site Management</p>
               </div>
             </div>
           </div>
@@ -222,6 +287,53 @@ export default function Admin() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-8 space-y-8">
+        {/* Site Settings Section */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Settings className="w-5 h-5 text-primary" />
+              <h2 className="text-lg font-semibold text-foreground">Site Settings</h2>
+            </div>
+            <Button
+              onClick={saveSettings}
+              disabled={savingSettings}
+              className="gap-2"
+            >
+              {savingSettings ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
+              Save Changes
+            </Button>
+          </div>
+
+          <div className="bg-card border border-border rounded-xl p-6 space-y-4">
+            {siteSettings.map((setting) => (
+              <div key={setting.id} className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  {getSettingLabel(setting.setting_key)}
+                </label>
+                {setting.setting_key === "footer_text" ? (
+                  <Textarea
+                    value={editedSettings[setting.setting_key] || ""}
+                    onChange={(e) => updateSetting(setting.setting_key, e.target.value)}
+                    className="bg-input border-border font-mono text-sm"
+                    rows={2}
+                  />
+                ) : (
+                  <Input
+                    type="text"
+                    value={editedSettings[setting.setting_key] || ""}
+                    onChange={(e) => updateSetting(setting.setting_key, e.target.value)}
+                    className="bg-input border-border font-mono"
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+
         {/* Invite Codes Section */}
         <section className="space-y-4">
           <div className="flex items-center justify-between">
