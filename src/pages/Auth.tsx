@@ -3,21 +3,30 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Skull, Loader2, KeyRound, UserPlus, LogIn } from "lucide-react";
+import { Skull, Loader2, LogIn } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
 
 const emailSchema = z.string().email("Invalid email address");
 const passwordSchema = z.string().min(6, "Password must be at least 6 characters");
 
+interface SiteSettings {
+  site_name: string;
+  site_description: string;
+  footer_text: string;
+  login_subtitle: string;
+}
+
 export default function Auth() {
-  const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [username, setUsername] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
   const [loading, setLoading] = useState(false);
-  const [requireInvite, setRequireInvite] = useState(true);
+  const [settings, setSettings] = useState<SiteSettings>({
+    site_name: "JailbreakLab",
+    site_description: "AI Security Testing Suite",
+    footer_text: "AI Pentesting Suite v2.0 • For authorized research only",
+    login_subtitle: "Access your testing suite",
+  });
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -27,6 +36,22 @@ export default function Auth() {
         navigate("/");
       }
     });
+
+    // Fetch site settings
+    const fetchSettings = async () => {
+      const { data } = await supabase
+        .from("site_settings")
+        .select("setting_key, setting_value");
+      
+      if (data) {
+        const settingsMap = data.reduce((acc, item) => {
+          acc[item.setting_key as keyof SiteSettings] = item.setting_value;
+          return acc;
+        }, {} as SiteSettings);
+        setSettings(prev => ({ ...prev, ...settingsMap }));
+      }
+    };
+    fetchSettings();
   }, [navigate]);
 
   const validateInputs = () => {
@@ -46,11 +71,6 @@ export default function Auth() {
         toast.error(e.errors[0].message);
         return false;
       }
-    }
-
-    if (mode === "signup" && !username.trim()) {
-      toast.error("Username is required");
-      return false;
     }
 
     return true;
@@ -86,109 +106,6 @@ export default function Auth() {
     }
   };
 
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!validateInputs()) return;
-
-    setLoading(true);
-    try {
-      // Validate invite code if required
-      if (requireInvite && inviteCode) {
-        const { data: codeData, error: codeError } = await supabase
-          .from("invite_codes")
-          .select("*")
-          .eq("code", inviteCode)
-          .is("used_by", null)
-          .maybeSingle();
-
-        if (codeError || !codeData) {
-          toast.error("Invalid or expired invite code");
-          setLoading(false);
-          return;
-        }
-
-        // Check if expired
-        if (codeData.expires_at && new Date(codeData.expires_at) < new Date()) {
-          toast.error("This invite code has expired");
-          setLoading(false);
-          return;
-        }
-      } else if (requireInvite) {
-        toast.error("Invite code is required");
-        setLoading(false);
-        return;
-      }
-
-      // Check if username is taken
-      const { data: existingUser } = await supabase
-        .from("profiles")
-        .select("username")
-        .eq("username", username)
-        .maybeSingle();
-
-      if (existingUser) {
-        toast.error("Username is already taken");
-        setLoading(false);
-        return;
-      }
-
-      const redirectUrl = `${window.location.origin}/`;
-
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: redirectUrl,
-          data: {
-            username: username,
-          },
-        },
-      });
-
-      if (error) {
-        if (error.message.includes("already registered")) {
-          toast.error("This email is already registered");
-        } else {
-          toast.error(error.message);
-        }
-        return;
-      }
-
-      // Mark invite code as used
-      if (inviteCode && data.user) {
-        await supabase
-          .from("invite_codes")
-          .update({ 
-            used_by: data.user.id,
-            used_at: new Date().toISOString()
-          })
-          .eq("code", inviteCode);
-      }
-
-      toast.success("Account created successfully!");
-      navigate("/");
-    } catch (error) {
-      toast.error("An unexpected error occurred");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Check if any users exist (first user doesn't need invite code)
-  useEffect(() => {
-    const checkFirstUser = async () => {
-      const { count } = await supabase
-        .from("profiles")
-        .select("*", { count: "exact", head: true });
-      
-      if (count === 0) {
-        setRequireInvite(false);
-      }
-    };
-    checkFirstUser();
-  }, []);
-
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -198,59 +115,17 @@ export default function Auth() {
             <Skull className="w-10 h-10 text-primary" />
           </div>
           <h1 className="text-2xl font-bold text-foreground mb-2 font-mono">
-            JailbreakLab
+            {settings.site_name}
           </h1>
           <p className="text-muted-foreground text-sm">
-            {mode === "login" ? "Access your testing suite" : "Join the research team"}
+            {settings.login_subtitle}
           </p>
         </div>
 
         {/* Form Card */}
         <div className="bg-card border border-border rounded-xl p-6 space-y-6">
-          {/* Mode Toggle */}
-          <div className="flex bg-surface rounded-lg p-1">
-            <button
-              onClick={() => setMode("login")}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors ${
-                mode === "login"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <LogIn className="w-4 h-4" />
-              Sign In
-            </button>
-            <button
-              onClick={() => setMode("signup")}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors ${
-                mode === "signup"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <UserPlus className="w-4 h-4" />
-              Sign Up
-            </button>
-          </div>
-
           {/* Form */}
-          <form onSubmit={mode === "login" ? handleLogin : handleSignup} className="space-y-4">
-            {mode === "signup" && (
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Username
-                </label>
-                <Input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Enter username..."
-                  className="bg-input border-border font-mono"
-                  required
-                />
-              </div>
-            )}
-
+          <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2">
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Email
@@ -279,34 +154,6 @@ export default function Auth() {
               />
             </div>
 
-            {mode === "signup" && requireInvite && (
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                  <KeyRound className="w-3 h-3" />
-                  Invite Code
-                </label>
-                <Input
-                  type="text"
-                  value={inviteCode}
-                  onChange={(e) => setInviteCode(e.target.value)}
-                  placeholder="Enter invite code..."
-                  className="bg-input border-border font-mono"
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  Get an invite code from an admin
-                </p>
-              </div>
-            )}
-
-            {mode === "signup" && !requireInvite && (
-              <div className="bg-primary/10 border border-primary/20 rounded-lg p-3">
-                <p className="text-xs text-primary">
-                  🎉 First user signup! You'll automatically become an admin.
-                </p>
-              </div>
-            )}
-
             <Button
               type="submit"
               className="w-full gap-2"
@@ -314,19 +161,17 @@ export default function Auth() {
             >
               {loading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
-              ) : mode === "login" ? (
-                <LogIn className="w-4 h-4" />
               ) : (
-                <UserPlus className="w-4 h-4" />
+                <LogIn className="w-4 h-4" />
               )}
-              {loading ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}
+              {loading ? "Please wait..." : "Sign In"}
             </Button>
           </form>
         </div>
 
         {/* Footer */}
         <p className="text-center text-xs text-muted-foreground mt-6">
-          AI Pentesting Suite v2.0 • For authorized research only
+          {settings.footer_text}
         </p>
       </div>
     </div>
