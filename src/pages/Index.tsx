@@ -135,52 +135,8 @@ const Index = () => {
     setSidebarOpen(false); // Close mobile sidebar after selection
   };
 
-  // Check if using local Ollama
-  const isOllamaLocal = (endpoint: string) => {
-    return endpoint.includes("localhost:11434") || endpoint.includes("127.0.0.1:11434");
-  };
-
-  // Direct Ollama call from browser (bypasses edge function)
-  const callOllamaDirectly = async (
-    endpoint: string,
-    modelName: string,
-    systemPrompt: string,
-    userMsg: string,
-    history: { role: string; content: string }[]
-  ) => {
-    const baseUrl = endpoint.replace(/\/v1\/?$/, "");
-    const url = `${baseUrl}/api/chat`;
-    
-    const messages = [
-      { role: "system", content: systemPrompt },
-      ...history,
-      { role: "user", content: userMsg },
-    ];
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: modelName,
-        messages,
-        stream: false,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Ollama error: ${response.status} - ${errorText}`);
-    }
-
-    const data = await response.json();
-    return data.message?.content || "No response from Ollama";
-  };
-
   const handleSendMessage = async (content: string) => {
-    const usingOllama = isOllamaLocal(apiEndpoint);
-    
-    // Only require API key for non-Ollama endpoints
-    if (!usingOllama && !apiKey) {
+    if (!apiKey) {
       toast.error("Please enter your API key");
       return;
     }
@@ -217,44 +173,29 @@ const Index = () => {
     await saveMessage(activeConversation.id, "user", userMessage.content);
 
     try {
-      let responseText: string;
-
-      if (usingOllama) {
-        // Call Ollama directly from browser
-        responseText = await callOllamaDirectly(
+      const { data, error } = await supabase.functions.invoke("jailbreak-test", {
+        body: {
+          apiKey,
           apiEndpoint,
           model,
           jailbreakPrompt,
-          processedContent,
-          messages.map((m) => ({ role: m.role, content: m.content }))
-        );
-      } else {
-        // Use edge function for other providers
-        const { data, error } = await supabase.functions.invoke("jailbreak-test", {
-          body: {
-            apiKey,
-            apiEndpoint,
-            model,
-            jailbreakPrompt,
-            userMessage: processedContent,
-            stealthMode,
-            conversationHistory: messages.map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
-          },
-        });
+          userMessage: processedContent,
+          stealthMode,
+          conversationHistory: messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+        },
+      });
 
-        if (error) {
-          throw new Error(error.message);
-        }
-        responseText = data.response;
+      if (error) {
+        throw new Error(error.message);
       }
 
       const assistantMessage: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: responseText,
+        content: data.response,
         timestamp: new Date(),
       };
 
